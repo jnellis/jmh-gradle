@@ -1,0 +1,197 @@
+import groovy.xml.XmlUtil
+ 
+// gather old jmh-gradle-plugin options
+def extJmh = project.extensions.create('jmh', JmhArgsExtension) 
+def cleanable = true  // WARNING:UNTESTED: setting to false means the working dir is the project dir
+def benchmarksDir = "${cleanable ? buildDir : projectDir}/benchmarks"
+ 
+def isWindows =  System.getProperty('os.name').toLowerCase().contains('window')
+def commandLineArgs = { args ->
+  isWindows ? [ 'cmd', '/c', *args] : args
+}
+
+sourceSets {
+  jmh {
+    java.srcDir 'src/jmh/java'
+    resources.srcDir 'src/jmh/resources'
+
+    compileClasspath += sourceSets.main.output
+    runtimeClasspath += sourceSets.main.output
+  }
+}
+ 
+afterEvaluate {
+  dependencies {
+    jmhCompile "org.openjdk.jmh:jmh-core:$extJmh.jmhVersion"
+    jmhCompile "org.openjdk.jmh:jmh-generator-bytecode:$extJmh.jmhVersion"
+
+    jmhRuntime "org.openjdk.jmh:jmh-generator-annprocess:$extJmh.jmhVersion"
+  }
+}
+
+def mvnSetup =  {['mvn', '-e', 'archetype:generate',
+                  '-DinteractiveMode=false',
+                  '-DarchetypeGroupId=org.openjdk.jmh',
+                  '-DarchetypeArtifactId=jmh-java-benchmark-archetype',
+                  "-DarchetypeVersion=${extJmh.jmhVersion}",
+                  "-DgroupId=${project.group}",
+                  "-DartifactId=benchmarks",
+                  "-Dversion=${project.version}"]}
+
+def mvnCleanInstall = ['mvn', 'clean', 'install' ]
+
+
+task jmhSetupBenchmarks(type: Exec ) { 
+  onlyIf{
+    !project.file("${benchmarksDir}/pom.xml").exists()
+  }
+  workingDir "${benchmarksDir}/.."
+  afterEvaluate {
+    commandLine commandLineArgs(mvnSetup())
+  }
+  doLast{ 
+    //replace src folder with link to jmh sources
+    delete  "${benchmarksDir}/src"
+    File pomFile = project.file("${benchmarksDir}/pom.xml")
+    def xml = new XmlSlurper(false, false).parse(pomFile)
+
+    xml.build.appendNode{
+      sourceDirectory file("$projectDir/src/jmh/").toString()
+    }
+
+    // and overwrite the pom.xml
+    def fw = new FileWriter(pomFile)
+    fw.write(XmlUtil.serialize(xml))
+    fw.close()
+  } 
+  outputs.file "${benchmarksDir}/pom.xml"
+}
+
+task jmhAddMvnDeps() {
+  dependsOn jmhSetupBenchmarks
+  dependsOn generatePomFileForMavenJavaPublication
+  inputs.file "${benchmarksDir}/pom.xml"
+  doLast { 
+    // get the jmh pom
+    def pomFile = project.file("${benchmarksDir}/pom.xml")
+    def xml = new XmlSlurper(false, false).parse(pomFile)
+
+    // get project uber jar group:artifact:version information
+    def jarDep =  tasks.findByName("generatePomFileForMavenJavaPublication").outputs.files[0]
+    def pj = new XmlSlurper(false, false).parse(jarDep)
+
+    // find uber jar dependency
+    def depFound = xml.dependencies.children().find { dependency ->
+      dependency.groupId.text() == pj.groupId.text() &&
+      dependency.artifactId.text() == pj.artifactId.text() &&
+      dependency.version.text() == pj.version.text()
+    }
+
+    if (!depFound) {
+      // add project uber jar dependency
+      xml.dependencies.appendNode {
+        dependency {
+          groupId pj.groupId.text()
+          artifactId pj.artifactId.text()
+          it.version pj.version.text()
+        }
+      }
+
+      // and overwrite the pom.xml
+      def fw = new FileWriter(pomFile)
+      fw.write(XmlUtil.serialize(xml))
+      fw.close()
+    }
+  }
+  outputs.file "${benchmarksDir}/pom.xml"
+}
+
+
+task jmhBuildBenchmarks(type: Exec, dependsOn : [publishToMavenLocal, jmhAddMvnDeps]) {
+  workingDir "${benchmarksDir}"
+  commandLine commandLineArgs(mvnCleanInstall)
+  outputs.file "${benchmarksDir}/target/benchmarks.jar"
+}
+ 
+task jmh(type: JavaExec, dependsOn: jmhBuildBenchmarks){  
+  classpath = project.files(["${benchmarksDir}/target/benchmarks.jar"])
+  main = 'org.openjdk.jmh.Main'
+  doFirst{ 
+    args =  extJmh.include + extJmh.castleAaaaaaaarrgh()
+  } 
+}
+  
+class JmhArgsExtension  {
+
+  def arrgh = {val,type ->
+    throw new RuntimeException("Argument '$val' should be a $type")
+  }
+  def listArg ={ it instanceof List && ! it.isEmpty() ? it.join('').trim() : arrgh(it,'non-empty List') }
+  def intArg = { it instanceof Number ? it.toString() : arrgh(it, 'Integer') }
+  def stringArg = {it instanceof String ? it : arrgh(it, 'String')}
+  def boolArg = {it instanceof Boolean ? it.toString() : arrgh(it,'Boolean')}
+  def fileArg = {it instanceof File ? it.getPath() : arrgh(it, 'File')}
+  def paramArg = {it instanceof Map ?: arrgh(it, 'Map')
+    // todo: check param format
+  }
+  def argsMap = [ 
+      exclude: ['-e', listArg ],
+      iterations: ['-i', intArg],
+      benchmarkMode: ['-bm',listArg],
+      batchSize: ['-bs',intArg],
+      fork: ['-f',intArg],
+      failOnError: ['-foe',boolArg ],
+      forceGC : ['-gc', boolArg],
+      help: ['-h'],
+      jvm: ['-jvm', stringArg],
+      jvmArgs: ['-jvmArgs', listArg],
+      jvmArgsAppend: ['-jvmArgsAppend', listArg],
+      jvmArgsPrepend: ['-jvmArgsPrepend', listArg],
+      list: ['-l'],
+      listp: ['-lp'],
+      lprof: ['-lprof'],
+      lrf : ['-lrf'],
+      humanOutputFile : ['-o', fileArg],
+      resultsFile: ['-rff', fileArg],
+      operationsPerInvocation: ['-opi', intArg],
+      benchmarkParameters: ['-p',paramArg],
+      profilers: ['-prof', listArg],
+      timeOnIteration: ['-r', stringArg],
+      resultFormat: ['-rf', stringArg],
+      synchronizeIterations: ['-si', boolArg],
+      threads: ['-t', intArg],
+      threadGroups: ['-tg', listArg],
+      timeout: ['-to',intArg],
+      timeUnit: ['-tu', stringArg],
+      verbosity: ['-v', stringArg],
+      warmup: ['-w', stringArg],
+      warmupBatchSize: ['-wbs',intArg],
+      warmupForks: ['-wf', intArg],
+      warmupIterations: ['-wi',intArg],
+      warmupMode: ['-wm', stringArg],
+      warmupBenchmarks: ['-wmb',listArg]
+  ]
+  List<String> include = new ArrayList<>() 
+  String jmhVersion = "1.21"
+  def props = [:]
+  def propertyMissing(String name, value) { props[name] = value }
+  def propertyMissing(String name) { props[name] }
+
+  def castleAaaaaaaarrgh(){
+    def args = []  
+    for(prop in props){ 
+      def tuple =  argsMap[prop.key]
+      if(tuple) {
+        args << tuple[0]
+        if (tuple.size() > 1) {
+          def closure = tuple[1] 
+          args << closure(prop.value)
+        }
+      } else{ 
+        println "unsupported jmh param: $prop.key" 
+      } 
+    } 
+    return args 
+  } 
+}
+
