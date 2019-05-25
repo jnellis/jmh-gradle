@@ -39,7 +39,6 @@ Will it work for everyone? Probably not but the script is short and you can prob
 * It does support additional jmh command line options like help and benchmark lists that can be comment/uncommented out since these exit the benchmarking run by default. 
 * Options from the jmh-gradle-plugin's `jmh` block that are not supported will report that they are not supported.
 * You may not need to specify `jvmArgs = ['-Djmh.separateClasspathJAR=true']` anymore.
-* The jmh option `benchmarkParameters` hasn't been implemented yet. whoops.
 * It doesn't respond to actual command line options, everything is through the `jmh` block.
 * It should work fine with jmhReport. 
 * Consider just using maven with benchmarks as a subproject and not bother with gradle or any of this.
@@ -62,7 +61,7 @@ jmh {
    humanOutputFile = project.file("${project.buildDir}/reports/jmh/human.txt") // human-readable output file
    resultsFile = project.file("${project.buildDir}/reports/jmh/results.txt") // results file
    operationsPerInvocation = 10 // Operations per invocation.
-   benchmarkParameters =  [:] // Benchmark parameters.
+   benchmarkParameters =  ["paramName":[val1,val2,val3]] // Benchmark parameters.
    profilers = [] // Use profilers to collect additional data. Supported profilers: [cl, comp, gc, stack, perf, perfnorm, perfasm, xperf, xperfasm, hs_cl, hs_comp, hs_gc, hs_rt, hs_thr]
    timeOnIteration = '1s' // Time to spend at each measurement iteration.
    resultFormat = 'CSV' // Result format type (one of CSV, JSON, NONE, SCSV, TEXT)
