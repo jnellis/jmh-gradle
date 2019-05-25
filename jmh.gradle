@@ -1,8 +1,8 @@
 import groovy.xml.XmlUtil
- 
+
 // gather old jmh-gradle-plugin options
 def extJmh = project.extensions.create('jmh', JmhArgsExtension) 
-def cleanable = true  // WARNING:UNTESTED: setting to false means the working dir is the project dir
+def cleanable = true  // false brings the maven subproject out of the build dir
 def benchmarksDir = "${cleanable ? buildDir : projectDir}/benchmarks"
  
 def isWindows =  System.getProperty('os.name').toLowerCase().contains('window')
@@ -18,7 +18,7 @@ sourceSets {
     compileClasspath += sourceSets.main.output
     runtimeClasspath += sourceSets.main.output
   }
-}
+} 
  
 afterEvaluate {
   dependencies {
@@ -40,6 +40,29 @@ def mvnSetup =  {['mvn', '-e', 'archetype:generate',
 
 def mvnCleanInstall = ['mvn', 'clean', 'install' ]
 
+def findDepInPom = { dep, xml ->
+  xml.dependencies.children().find { dependency ->
+    dependency.groupId.text()    == dep.groupId.text() &&
+    dependency.artifactId.text() == dep.artifactId.text() &&
+    dependency.version.text()    == dep.version.text()
+  }
+}
+
+def addDepToPom = { dep, xml ->
+  xml.dependencies.appendNode {
+    dependency {
+      groupId    dep.groupId.text()
+      artifactId dep.artifactId.text()
+      it.version dep.version.text()
+    }
+  }
+} 
+
+def pomOverwrite = { pomFile, xml ->
+  def fw = new FileWriter(pomFile)
+  fw.write(XmlUtil.serialize(xml))
+  fw.close()
+}
 
 task jmhSetupBenchmarks(type: Exec ) { 
   onlyIf{
@@ -59,10 +82,7 @@ task jmhSetupBenchmarks(type: Exec ) {
       sourceDirectory file("$projectDir/src/jmh/").toString()
     }
 
-    // and overwrite the pom.xml
-    def fw = new FileWriter(pomFile)
-    fw.write(XmlUtil.serialize(xml))
-    fw.close()
+    pomOverwrite(pomFile,xml)
   } 
   outputs.file "${benchmarksDir}/pom.xml"
 }
@@ -70,6 +90,7 @@ task jmhSetupBenchmarks(type: Exec ) {
 task jmhAddMvnDeps() {
   dependsOn jmhSetupBenchmarks
   dependsOn generatePomFileForMavenJavaPublication
+  dependsOn jmhClasses
   inputs.file "${benchmarksDir}/pom.xml"
   doLast { 
     // get the jmh pom
@@ -78,35 +99,18 @@ task jmhAddMvnDeps() {
 
     // get project uber jar group:artifact:version information
     def jarDep =  tasks.findByName("generatePomFileForMavenJavaPublication").outputs.files[0]
-    def pj = new XmlSlurper(false, false).parse(jarDep)
-
-    // find uber jar dependency
-    def depFound = xml.dependencies.children().find { dependency ->
-      dependency.groupId.text() == pj.groupId.text() &&
-      dependency.artifactId.text() == pj.artifactId.text() &&
-      dependency.version.text() == pj.version.text()
-    }
+    def dep = new XmlSlurper(false, false).parse(jarDep)
+ 
+    def depFound = findDepInPom(dep, xml)
 
     if (!depFound) {
-      // add project uber jar dependency
-      xml.dependencies.appendNode {
-        dependency {
-          groupId pj.groupId.text()
-          artifactId pj.artifactId.text()
-          it.version pj.version.text()
-        }
-      }
-
-      // and overwrite the pom.xml
-      def fw = new FileWriter(pomFile)
-      fw.write(XmlUtil.serialize(xml))
-      fw.close()
+      addDepToPom(dep, xml) 
+      pomOverwrite(pomFile, xml)
     }
   }
   outputs.file "${benchmarksDir}/pom.xml"
 }
-
-
+ 
 task jmhBuildBenchmarks(type: Exec, dependsOn : [publishToMavenLocal, jmhAddMvnDeps]) {
   workingDir "${benchmarksDir}"
   commandLine commandLineArgs(mvnCleanInstall)
@@ -132,7 +136,7 @@ class JmhArgsExtension  {
   def boolArg = {it instanceof Boolean ? it.toString() : arrgh(it,'Boolean')}
   def fileArg = {it instanceof File ? it.getPath() : arrgh(it, 'File')}
   def paramArg = {it instanceof Map ?: arrgh(it, 'Map')
-    // todo: check param format
+    it.collect{ pvar,vals-> "$pvar=${vals.join(',')}"}.join([' -p ']).split(' ') 
   }
   def argsMap = [ 
       exclude: ['-e', listArg ],
@@ -184,8 +188,8 @@ class JmhArgsExtension  {
       if(tuple) {
         args << tuple[0]
         if (tuple.size() > 1) {
-          def closure = tuple[1] 
-          args << closure(prop.value)
+          def closure = tuple[1]
+          args.addAll closure(prop.value)
         }
       } else{ 
         println "unsupported jmh param: $prop.key" 
@@ -194,4 +198,3 @@ class JmhArgsExtension  {
     return args 
   } 
 }
-
