@@ -1,0 +1,176 @@
+/**
+ * A drop in replacement for jmh-gradle-plugin for gradle versions 5+ that 
+ * accepts the jmh configuration block of the jmh-gradle-plugin.
+ * 
+ * This can be a starting point for customizing your own benchmark needs
+ * that have been difficult with the jmh-gradle-plugin for whatever reasons 
+ * (e.g. locking resource files on windows.)
+ * 
+ * Place this file next to your build.gradle in your projectDir and then add
+ * 
+ *     apply from: 'jmh.gradle' 
+ * 
+ * in the build.gradle file. 
+ */
+ 
+// recreate jmh-gradle-plugin options container
+project.extensions.create('jmh', JmhArgsExtension)
+
+// create a placeholder jmh task so jmhReport can be finalizedBy it.
+task jmh(type:JavaExec){}
+
+afterEvaluate { // required to allow build.gradle to see jmh block first
+  sourceSets {
+    jmh {
+      java.srcDir 'src/jmh/java'
+      groovy.srcDir 'src/jmh/groovy'
+      resources.srcDir 'src/jmh/resources'
+
+      compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+      runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+
+      if (project.jmh.includeTests) {
+        compileClasspath += sourceSets.test.output + sourceSets.test.compileClasspath
+        runtimeClasspath += sourceSets.test.output + sourceSets.test.runtimeClasspath
+      }
+    }
+  }
+ 
+  dependencies {
+    jmhImplementation "org.openjdk.jmh:jmh-core:$jmh.jmhVersion" 
+    jmhImplementation "org.openjdk.jmh:jmh-generator-bytecode:$jmh.jmhVersion"
+
+    jmhAnnotationProcessor "org.openjdk.jmh:jmh-generator-annprocess:$jmh.jmhVersion"
+  }
+
+  /**
+   * Make a fat jar.
+   */
+  task jmhJar(type:Jar) {
+    group "jmh"
+    manifest{
+      attributes 'ImplemenationTitle': 'JMH Benchmarks',
+      'Implementation-Version': version,
+      'Main-Class': 'org.openjdk.jmh.Main'
+    }
+    archiveAppendix = 'benchmarks'
+    zip64 = true
+    from  sourceSets.jmh.output
+    from  configurations.jmhRuntimeClasspath.collect{ it.isDirectory() ? it : zipTree(it) }
+    from  configurations.runtimeClasspath.collect{ it.isDirectory() ? it : zipTree(it) }
+    if(jmh.includeTests){
+      from sourceSets.test.output
+      from configurations.testRuntimeClasspath.collect{ it.isDirectory() ? it : zipTree(it) }
+    }
+
+    with jar // or with shadowJar? 
+  }
+
+  /**
+   * Run that fat jar.
+   */
+  tasks.jmh { 
+    group "jmh"
+    dependsOn jmhJar
+    systemProperties = ['java.io.tmpdir': getTemporaryDir()]
+    workingDir = getTemporaryDir()
+    classpath = files([tasks.jmhJar.outputs.files])
+    main = 'org.openjdk.jmh.Main'
+    doFirst {
+      args = jmh.include + jmh.castleAaaaaaaarrgh()
+    }
+  }
+
+  /**
+   * Is this so taboo? Run jmh from the classpath. 
+   */
+  task jmhClasspathRun(type: JavaExec, dependsOn: jmhClasses){
+     group "jmh"
+     systemProperties = ['java.io.tmpdir': getTemporaryDir()]
+     workingDir = getTemporaryDir()
+     classpath = sourceSets.jmh.runtimeClasspath
+     main = 'org.openjdk.jmh.Main'
+     doFirst {
+       args = jmh.include + jmh.castleAaaaaaaarrgh()
+     }
+     // if we were running jmhReport after jmh, do it here too.
+     if(tasks.jmh.finalizedBy.getDependencies().contains(tasks.findByName('jmhReport'))){
+       finalizedBy tasks.jmhReport
+     }
+  } 
+} 
+  
+class JmhArgsExtension {
+
+  def arrgh = { val, type -> throw new RuntimeException("Argument '$val' should be a $type") }
+  def listArgComma = {it instanceof List && !it.isEmpty() ? it.join(',').trim() : arrgh(it, 'non-empty List') }
+  def intArg = { it instanceof Number ? it.toString() : arrgh(it, 'Integer') }
+  def stringArg = { it instanceof String ? it : arrgh(it, 'String') }
+  def boolArg = { it instanceof Boolean ? it.toString() : arrgh(it, 'Boolean') }
+  def fileArg = { it instanceof File ? it.getPath() : arrgh(it, 'File') }
+  def paramArg = { it instanceof Map ?: arrgh(it, 'Map')
+    it.collect { pvar, vals -> "$pvar=${vals.join(',')}" }.join([' -p ']).split(' ')
+  }
+  def argsMap = [
+      exclude                : ['-e', listArgComma],
+      iterations             : ['-i', intArg],
+      benchmarkMode          : ['-bm', listArgComma],
+      batchSize              : ['-bs', intArg],
+      fork                   : ['-f', intArg],
+      failOnError            : ['-foe', boolArg],
+      forceGC                : ['-gc', boolArg],
+      help                   : ['-h'],
+      jvm                    : ['-jvm', stringArg],
+      jvmArgs                : ['-jvmArgs', listArgComma],
+      jvmArgsAppend          : ['-jvmArgsAppend', listArgComma],
+      jvmArgsPrepend         : ['-jvmArgsPrepend', listArgComma],
+      list                   : ['-l'],
+      listp                  : ['-lp'],
+      lprof                  : ['-lprof'],
+      lrf                    : ['-lrf'],
+      humanOutputFile        : ['-o', fileArg],
+      resultsFile            : ['-rff', fileArg],
+      operationsPerInvocation: ['-opi', intArg],
+      benchmarkParameters    : ['-p', paramArg],
+      profilers              : ['-prof', listArgComma],
+      timeOnIteration        : ['-r', stringArg],
+      resultFormat           : ['-rf', stringArg],
+      synchronizeIterations  : ['-si', boolArg],
+      threads                : ['-t', intArg],
+      threadGroups           : ['-tg', listArgComma],
+      timeout                : ['-to', intArg],
+      timeUnit               : ['-tu', stringArg],
+      verbosity              : ['-v', stringArg],
+      warmup                 : ['-w', stringArg],
+      warmupBatchSize        : ['-wbs', intArg],
+      warmupForks            : ['-wf', intArg],
+      warmupIterations       : ['-wi', intArg],
+      warmupMode             : ['-wm', stringArg],
+      warmupBenchmarks       : ['-wmb', listArgComma]
+  ]
+  List<String> include = new ArrayList<>()
+  String jmhVersion = "1.21"
+  Boolean includeTests = false
+  def props = [:]
+
+  def propertyMissing(String name, value) { props[name] = value }
+
+  def propertyMissing(String name) { props[name] }
+
+  def castleAaaaaaaarrgh() {
+    def args = []
+    for (prop in props) {
+      def tuple = argsMap[prop.key]
+      if (tuple) {
+        args << tuple[0]
+        if (tuple.size() > 1) {
+          def closure = tuple[1]
+          args.addAll closure(prop.value)
+        }
+      } else {
+        println "unsupported jmh param: $prop.key"
+      }
+    }
+    return args
+  }
+}
