@@ -1,5 +1,5 @@
 # jmh-gradle
-A drop-in replacement workaround for the current issues with [jmh-gradle-plugin](https://github.com/melix/jmh-gradle-plugin) on windows.
+A jmh benchmark build script and drop-in replacement workaround for the current issues with [jmh-gradle-plugin](https://github.com/melix/jmh-gradle-plugin) on windows.  It is not windows specific and can be a simpler script for running jmh benchmarks. 
 
 # What/why is this?
 
@@ -8,7 +8,7 @@ Currently the jmh-gradle-plugin is broken for windows machines. On windows machi
 1. Use jmh-gradle-plugin version 0.4.3 and gradle 4.0.2 or earlier (these versions don't use the gradle Worker API which is the underlying issue.)
 2. Do your benchmarking solely in WSL (windows subsystem for linux) for which file locking does not exist but sometimes zombie processes do pile up for some reason and you will likely need a machine with more RAM. 
 3. Run with the `--no-daemon` gradle option. 
-4. Replace jmh-gradle-plugin with this script until things get sorted.
+4. Replace jmh-gradle-plugin with this script.
 
 
 ### Issue related reading
@@ -18,30 +18,30 @@ Currently the jmh-gradle-plugin is broken for windows machines. On windows machi
 
 [Gradle daemon locks files by leaving file handles open #937](https://github.com/gradle/gradle/issues/937)
 
-
-# Dependencies:
-* Maven installed and on path.
-* Being able/wanting to publish to mavenLocal.
-
 # Usage:
-If you've been using the jmh-gradle-plugin and have configured the `jmh` block that passes on runtime options to jmh in your build.gradle file then you might not have to do anything except comment out the jmh plugin and drop this jmh.gradle file into your project directory and then insert the following into your build.gradle.
+If you've been using the jmh-gradle-plugin and have configured the `jmh` block that passes on runtime options to jmh in your `build.gradle` file then you might not have to do anything except comment out the jmh plugin and drop this `jmh.gradle` file into your project directory and then insert the following into your `build.gradle`.
 
 `apply from: 'jmh.gradle'`
 
-# What is involved / What to expect
-This workaround is no magic beans. The JMH web pages suggest [running benchmarks](https://openjdk.java.net/projects/code-tools/jmh/) from a maven project and so that is what this script is doing. It basically runs an Exec task that creates a maven pom project in your build directory, throws out the sample benchmark and links to your `src/jmh/java` directory for sources, relies on the gradle task `publishToMavenLocal` so it can see your project jar and then builds and runs the benchmarks. 
+If you haven't used the jmh-gradle-plugin you will need to configure the jmh block. See the example project build.gradle file for an idea. A list of options are at the bottom here.
 
-Will it work for everyone? Probably not but the script is short and you can probably hack on it to your needs very quickly.
-* It's not specific to windows so its likely to work on linux (it works fine in WSL.)
-* It may require you build/publish an uber jar.
-* It doesn't support the jmh-gradle-plugin `includedTests` so you will have to create a publish task for your tests jar and then add that as a dependency to the generated pom.xml file. 
+# Tasks
+  ### jmh
+  This task mirrors the jmh-gradle-plugin task and depends on the jmhJar task to create an uber/fat jar. If you have benchmarks that pull from your test sources then you need to set `includeTests = true` in the jmh block. 
+  
+  ### jmhClasspathRun
+  This task bypasses creating an executable benchmark.jar file and executes benchmarks from the runtimeClasspath dependency chain.  Is this taboo? If you don't like your snow peas touching your mashed potatoes on your plate then maybe it is.
+   
+  ### jmhJar
+  This task mirrors the jmh-gradle-plugin task in creating an uber/fat jar from the runtimeClasspath dependency chain. It doesn't consider if you are using the shadow plugin or if you have duplicate class issues in the dependency chain yet. Feel free to poke around, its a short task. 
+  
+### other notes
 * It **has not** been tested on all the jmh options. 
 * It does support additional jmh command line options like help and benchmark lists that can be comment/uncommented out since these exit the benchmarking run by default. 
-* Options from the jmh-gradle-plugin's `jmh` block that are not supported will report that they are not supported.
+* Options from the jmh-gradle-plugin's `jmh` block that are not supported will report that they are not supported but will not throw an error.
 * You may not need to specify `jvmArgs = ['-Djmh.separateClasspathJAR=true']` anymore.
 * It doesn't respond to actual command line options, everything is through the `jmh` block.
-* It should work fine with jmhReport. 
-* Consider just using maven with benchmarks as a subproject and not bother with gradle or any of this.
+* It should work fine with the [jmhReport plugin](https://github.com/jzillmann/gradle-jmh-report) if you previously had the `jmh` task setup to finalizeBy jmhReport. If this was the case in your build then the `jmhClasspathRun` task is also hooked to run jmhReport as well.    
 
 ### Recapping `jmh` block parameters used in jmh-gradle-plugin (this is in your build.gradle)
 ```
@@ -93,5 +93,7 @@ jmh {
 }
 ```
 
+# Previous sanity check version
+The original version of this script is `jmh_mvn.gradle` and involves executing maven commands to create a benchmarks.jar file. It is very touchy and not recommended.  
 
 

@@ -1,0 +1,41 @@
+plugins{ 
+  id 'java'
+  id 'groovy'
+  id 'io.morethan.jmhreport' version '0.9.0'
+}
+
+apply from: '../../jmh.gradle'
+
+dependencies{
+  compile "org.apache.logging.log4j:log4j-slf4j-impl:2.11.2"
+  
+  testCompile "org.spockframework:spock-core:1.3-groovy-2.5" 
+  testCompile "junit:junit:4.12"
+} 
+
+def prj = project(':examples:base')
+def reportsDir =  "$prj.buildDir/reports/jmh/"   
+mkdir reportsDir
+def reportFile = prj.file("$reportsDir/result.json")
+
+jmh{
+  include = [".*"]
+  exclude = ["Spock","gcd2"]
+  benchmarkMode = ['avgt'] 
+  iterations = 5
+  fork = 2
+  timeOnIteration = '100ms'
+  timeUnit = 'ns'
+  warmup = '100ms'
+  warmupIterations = 5  
+  resultFormat = 'JSON'
+  resultsFile = reportFile
+  includeTests = true
+}
+
+jmhReport{
+  jmhResultPath = reportFile
+  jmhReportOutput = prj.file(reportsDir)
+}
+
+tasks.jmh.finalizedBy tasks.jmhReport
