@@ -103,7 +103,7 @@ afterEvaluate { // required to allow build.gradle to see jmh block first
 class JmhArgsExtension {
 
   def arrgh = { val, type -> throw new RuntimeException("Argument '$val' should be a $type") }
-  def listArgComma = {it instanceof List && !it.isEmpty() ? it.join(',').trim() : arrgh(it, 'non-empty List') }
+  def listArgComma = {it instanceof List && !it.isEmpty() ? it.join(' ').trim() : arrgh(it, 'non-empty List') }
   def intArg = { it instanceof Number ? it.toString() : arrgh(it, 'Integer') }
   def stringArg = { it instanceof String ? it : arrgh(it, 'String') }
   def boolArg = { it instanceof Boolean ? it.toString() : arrgh(it, 'Boolean') }
